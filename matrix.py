@@ -3,7 +3,6 @@ import random
 import sys
 import json
 import os
-import subprocess
 import win32gui
 import win32con
 import win32api
@@ -40,6 +39,31 @@ def hsv_to_rgb(h, s, v):
         return t, p, v
     else:
         return v, p, q
+
+
+def adjust_ui_element_position(element, panel_x, panel_y, scroll_offset):
+    """Temporarily adjust UI element position for event handling"""
+    temp_rect = element.rect.copy()
+    element.rect.x += panel_x + 20
+    element.rect.y += panel_y + 50 - scroll_offset
+    return temp_rect
+
+
+def draw_ui_element_with_offset(element, surface, content_surface, content_y_offset):
+    """Draw UI element with scroll offset applied"""
+    temp_rect = element.rect.copy()
+    element.rect.y += content_y_offset
+    
+    # Handle sliders which also have track_rect
+    if hasattr(element, 'track_rect'):
+        temp_track_rect = element.track_rect.copy()
+        element.track_rect.y += content_y_offset
+        element.draw(content_surface)
+        element.track_rect = temp_track_rect
+    else:
+        element.draw(content_surface)
+    
+    element.rect = temp_rect
 
 
 # --- Default Configuration ---
@@ -96,7 +120,6 @@ PULSE_EFFECT = DEFAULT_CONFIG["pulse_effect"]
 
 
 # --- Other Constants ---
-BACKGROUND_COLOR = (0, 0, 0)
 FRAME_RATE = 30
 SCREEN_WIDTH = 0
 SCREEN_HEIGHT = 0
@@ -603,290 +626,7 @@ class TextBox:
         self.cursor_position = len(self.text)
 
 
-def show_config_screen(surface):
-    current_config_values = load_config()
-    avg_stream_length = (
-        current_config_values["stream_length_min"]
-        + current_config_values["stream_length_max"]
-    ) // 2
-    slider_width = 280
-    column_padding = 40
-    column_gap = 70
-    color_preview_width = 50
-    color_preview_gap = 15
-    slider_x_col1 = column_padding
-    slider_x_col2 = column_padding + slider_width + column_gap
-    y_start = 75
-    y_step = 60
-    sliders = []
-    col1_y = y_start
-    sliders.append(
-        Slider(
-            slider_x_col1,
-            col1_y,
-            slider_width,
-            20,
-            10,
-            32,
-            current_config_values["font_size"],
-            "Font Size",
-            int,
-            1,
-        )
-    )
-    col1_y += y_step
-    sliders.append(
-        Slider(
-            slider_x_col1,
-            col1_y,
-            slider_width,
-            20,
-            1,
-            10,
-            current_config_values["min_speed"],
-            "Min Speed",
-            int,
-            1,
-        )
-    )
-    col1_y += y_step
-    sliders.append(
-        Slider(
-            slider_x_col1,
-            col1_y,
-            slider_width,
-            20,
-            2,
-            15,
-            current_config_values["max_speed"],
-            "Max Speed",
-            int,
-            1,
-        )
-    )
-    col1_y += y_step
-    sliders.append(
-        Slider(
-            slider_x_col1,
-            col1_y,
-            slider_width,
-            20,
-            0.05,
-            1.0,
-            current_config_values["new_drop_chance"],
-            "Drop Chance",
-            float,
-            0.05,
-        )
-    )
-    col1_y += y_step
-    sliders.append(
-        Slider(
-            slider_x_col1,
-            col1_y,
-            slider_width,
-            20,
-            0.0,
-            0.5,
-            current_config_values["char_change_prob"],
-            "Char Switch",
-            float,
-            0.01,
-        )
-    )
-    col2_y = y_start
-    sliders.append(
-        Slider(
-            slider_x_col2,
-            col2_y,
-            slider_width,
-            20,
-            10,
-            70,
-            avg_stream_length,
-            "Avg Length",
-            int,
-            1,
-        )
-    )
-    col2_y += y_step
-    r_slider = Slider(
-        slider_x_col2,
-        col2_y,
-        slider_width,
-        20,
-        0,
-        255,
-        current_config_values["body_color_r"],
-        "Red",
-        int,
-        1,
-    )
-    sliders.append(r_slider)
-    col2_y += y_step
-    g_slider = Slider(
-        slider_x_col2,
-        col2_y,
-        slider_width,
-        20,
-        0,
-        255,
-        current_config_values["body_color_g"],
-        "Green",
-        int,
-        1,
-    )
-    sliders.append(g_slider)
-    col2_y += y_step
-    b_slider = Slider(
-        slider_x_col2,
-        col2_y,
-        slider_width,
-        20,
-        0,
-        255,
-        current_config_values["body_color_b"],
-        "Blue",
-        int,
-        1,
-    )
-    sliders.append(b_slider)
-    # --- Add TextBox for custom phrases ---
-    phrases_label_font = get_katakana_font(22)
-    phrases_label = phrases_label_font.render(
-        "Custom Phrases (one per line):", True, (180, 255, 180)
-    )
-    phrases_box_x = slider_x_col2
-    phrases_box_y = b_slider.rect.bottom + 30
-    phrases_box_w = slider_width + 60
-    phrases_box_h = 100
-    phrases_box = TextBox(
-        phrases_box_x,
-        phrases_box_y,
-        phrases_box_w,
-        phrases_box_h,
-        "",
-        get_katakana_font(18),
-        max_lines=5,
-    )
-    # Set initial phrases
-    if "custom_phrases" in current_config_values:
-        phrases_box.set_lines(current_config_values["custom_phrases"])
-    max_slider_y = max(col1_y, col2_y)
-    button_y_pos = max(phrases_box_y + phrases_box_h, max_slider_y + y_step - 10)
-    button_width = 170
-    button_spacing = 25
-    total_button_width = 2 * button_width + button_spacing
-    button_start_x = (surface.get_width() - total_button_width) // 2
-    save_button = Button(button_start_x, button_y_pos, button_width, 45, "Save & Start")
-    default_button = Button(
-        button_start_x + button_width + button_spacing,
-        button_y_pos,
-        button_width,
-        45,
-        "Defaults",
-    )
-    title_font = get_katakana_font(30)
-    config_bg_color = (25, 30, 35)
-    running_config = True
-    while running_config:
-        current_body_color_preview = (
-            r_slider.current_val,
-            g_slider.current_val,
-            b_slider.current_val,
-        )
-        for event in pygame.event.get():
-            if event.type == pygame.QUIT:
-                pygame.quit()
-                sys.exit()
-            if event.type == pygame.KEYDOWN:
-                if event.key == pygame.K_ESCAPE:
-                    load_config()
-                    running_config = False
-            for slider in sliders:
-                slider.handle_event(event)
-            phrases_box.handle_event(event)
-            if sliders[1].current_val > sliders[2].current_val:
-                sliders[1].current_val = sliders[2].current_val
-            if save_button.handle_event(event):
-                avg_len_val = sliders[5].current_val
-                len_spread = max(5, avg_len_val // 4)
-                s_min = max(5, avg_len_val - len_spread)
-                s_max = avg_len_val + len_spread
-                config_to_save = {
-                    "font_size": sliders[0].current_val,
-                    "min_speed": sliders[1].current_val,
-                    "max_speed": sliders[2].current_val,
-                    "new_drop_chance": sliders[3].current_val,
-                    "char_change_prob": sliders[4].current_val,
-                    "stream_length_min": s_min,
-                    "stream_length_max": s_max,
-                    "body_color_r": r_slider.current_val,
-                    "body_color_g": g_slider.current_val,
-                    "body_color_b": b_slider.current_val,
-                    "custom_phrases": phrases_box.get_lines(),
-                }
-                save_config(config_to_save)
-                running_config = False
-            if default_button.handle_event(event):
-                defaults = DEFAULT_CONFIG.copy()
-                sliders[0].current_val = defaults["font_size"]
-                sliders[1].current_val = defaults["min_speed"]
-                sliders[2].current_val = defaults["max_speed"]
-                sliders[3].current_val = defaults["new_drop_chance"]
-                sliders[4].current_val = defaults["char_change_prob"]
-                sliders[5].current_val = (
-                    defaults["stream_length_min"] + defaults["stream_length_max"]
-                ) // 2
-                r_slider.current_val = defaults["body_color_r"]
-                g_slider.current_val = defaults["body_color_g"]
-                b_slider.current_val = defaults["body_color_b"]
-                phrases_box.set_lines(defaults["custom_phrases"])
-                save_config(defaults)
-        surface.fill(config_bg_color)
-        title_color_preview = (
-            min(255, r_slider.current_val + 60),
-            min(255, g_slider.current_val + 60),
-            min(255, b_slider.current_val + 60),
-        )
-        title_surf = title_font.render(
-            "Screensaver Configuration", True, title_color_preview
-        )
-        surface.blit(
-            title_surf, (surface.get_width() // 2 - title_surf.get_width() // 2, 20)
-        )
-        for slider_obj in sliders:
-            slider_obj.draw(surface)
-        preview_x = slider_x_col2 + slider_width + color_preview_gap
-        preview_y = sliders[6].rect.y
-        preview_h = sliders[8].rect.bottom - sliders[6].rect.top
-        pygame.draw.rect(
-            surface,
-            current_body_color_preview,
-            (preview_x, preview_y, color_preview_width, preview_h),
-        )
-        pygame.draw.rect(
-            surface,
-            (180, 180, 180),
-            (preview_x, preview_y, color_preview_width, preview_h),
-            2,
-        )
-        preview_font = get_katakana_font(16)
-        preview_text = preview_font.render("Color", True, (200, 200, 200))
-        surface.blit(
-            preview_text,
-            (
-                preview_x + (color_preview_width - preview_text.get_width()) // 2,
-                preview_y - 20,
-            ),
-        )
-        # Draw phrases label and box
-        surface.blit(phrases_label, (phrases_box_x, phrases_box_y - 28))
-        phrases_box.draw(surface)
-        save_button.draw(surface)
-        default_button.draw(surface)
-        pygame.display.flip()
-        pygame.time.Clock().tick(FRAME_RATE)
+
 
 
 # --- Drop Class, run_screensaver, main function (Remain THE SAME as previous version) ---
@@ -1134,15 +874,7 @@ def run_screensaver(screen):
                 if event.type == pygame.QUIT:
                     running = False
                 if event.type == pygame.KEYDOWN:
-                    if event.key == pygame.K_c:
-                        pygame.mouse.set_visible(True)
-                        show_config_screen(screen)
-                        pygame.mouse.set_visible(False)
-                        # Reset mouse position tracking after config
-                        last_mouse_pos = pygame.mouse.get_pos()
-                        time_since_last_significant_move = current_time
-                        continue
-                    elif event.key == pygame.K_m:
+                    if event.key == pygame.K_m:
                         pygame.mouse.set_visible(True)
                         show_live_config_screen(screen, monitor_drops, monitor_regions)
                         pygame.mouse.set_visible(False)
@@ -1246,10 +978,7 @@ def run_screensaver(screen):
             pygame.display.flip()
             clock.tick(FRAME_RATE)
         
-        if event.type == pygame.KEYDOWN and event.key == pygame.K_c:
-            continue
-        else:
-            break
+        break
 
 
 def show_live_config_screen(surface, current_drops, monitor_regions):
@@ -1416,7 +1145,7 @@ def show_live_config_screen(surface, current_drops, monitor_regions):
                     running = False
                 elif event.key == pygame.K_RETURN:
                     # Save and close
-                    _apply_live_config_enhanced(sliders, phrases_box, particle_density_slider, 
+                    _apply_live_config(sliders, phrases_box, particle_density_slider, 
                                              current_config, current_drops, monitor_regions)
                     running = False
                 elif event.key == pygame.K_UP:
@@ -1452,11 +1181,8 @@ def show_live_config_screen(surface, current_drops, monitor_regions):
             slider_changed = False
             for slider in sliders:
                 # Temporarily adjust slider positions to match screen coordinates
-                temp_rect = slider.rect.copy()
+                temp_rect = adjust_ui_element_position(slider, panel_x, panel_y, scroll_offset)
                 temp_track_rect = slider.track_rect.copy()
-                # Adjust for panel position and scroll offset
-                slider.rect.x += panel_x + 20
-                slider.rect.y += panel_y + 50 - scroll_offset
                 slider.track_rect.x += panel_x + 20
                 slider.track_rect.y += panel_y + 50 - scroll_offset
                 old_val = slider.current_val
@@ -1467,10 +1193,8 @@ def show_live_config_screen(surface, current_drops, monitor_regions):
                 slider.track_rect = temp_track_rect
             
             # Handle particle density slider
-            temp_rect = particle_density_slider.rect.copy()
+            temp_rect = adjust_ui_element_position(particle_density_slider, panel_x, panel_y, scroll_offset)
             temp_track_rect = particle_density_slider.track_rect.copy()
-            particle_density_slider.rect.x += panel_x + 20
-            particle_density_slider.rect.y += panel_y + 50 - scroll_offset
             particle_density_slider.track_rect.x += panel_x + 20
             particle_density_slider.track_rect.y += panel_y + 50 - scroll_offset
             old_particle_val = particle_density_slider.current_val
@@ -1482,66 +1206,54 @@ def show_live_config_screen(surface, current_drops, monitor_regions):
             
             # Force re-draw if any slider changed
             if slider_changed:
-                _apply_live_config_enhanced(sliders, phrases_box, particle_density_slider, 
+                _apply_live_config(sliders, phrases_box, particle_density_slider, 
                                          current_config, current_drops, monitor_regions, save_to_file=False)
             
             # Handle textbox events
-            temp_rect = phrases_box.rect.copy()
-            phrases_box.rect.x += panel_x + 20
-            phrases_box.rect.y += panel_y + 50 - scroll_offset
+            temp_rect = adjust_ui_element_position(phrases_box, panel_x, panel_y, scroll_offset)
             phrases_box.handle_event(event)
             phrases_box.rect = temp_rect
             
             # Handle theme button events
             for i, theme_button in enumerate(theme_buttons):
-                temp_rect = theme_button.rect.copy()
-                theme_button.rect.x += panel_x + 20
-                theme_button.rect.y += panel_y + 50 - scroll_offset
+                temp_rect = adjust_ui_element_position(theme_button, panel_x, panel_y, scroll_offset)
                 if theme_button.handle_event(event):
                     # Update button colors
                     for j, btn in enumerate(theme_buttons):
                         btn.color = (70, 70, 70) if j != i else (110, 110, 70)
                     current_config["matrix_theme"] = theme_names[i]
                     # Force re-draw of the screensaver
-                    _apply_live_config_enhanced(sliders, phrases_box, particle_density_slider, 
+                    _apply_live_config(sliders, phrases_box, particle_density_slider, 
                                              current_config, current_drops, monitor_regions, save_to_file=False)
                 theme_button.rect = temp_rect
             
             # Handle effect button events
             for i, effect_button in enumerate(effect_buttons):
-                temp_rect = effect_button.rect.copy()
-                effect_button.rect.x += panel_x + 20
-                effect_button.rect.y += panel_y + 50 - scroll_offset
+                temp_rect = adjust_ui_element_position(effect_button, panel_x, panel_y, scroll_offset)
                 if effect_button.handle_event(event):
                     effect_key = effects[i][1]
                     current_config[effect_key] = not current_config[effect_key]
                     effect_button.color = (110, 70, 70) if current_config[effect_key] else (70, 70, 70)
                     # Force re-draw of the screensaver
-                    _apply_live_config_enhanced(sliders, phrases_box, particle_density_slider, 
+                    _apply_live_config(sliders, phrases_box, particle_density_slider, 
                                              current_config, current_drops, monitor_regions, save_to_file=False)
                 effect_button.rect = temp_rect
             
             # Handle button events
-            temp_rect = save_button.rect.copy()
-            save_button.rect.x += panel_x + 20
-            save_button.rect.y += panel_y + 50 - scroll_offset
+            temp_rect = adjust_ui_element_position(save_button, panel_x, panel_y, scroll_offset)
             save_clicked = save_button.handle_event(event)
             save_button.rect = temp_rect
             
-            temp_rect = reset_button.rect.copy()
-            reset_button.rect.x += panel_x + 20
-            reset_button.rect.y += panel_y + 50 - scroll_offset
+            temp_rect = adjust_ui_element_position(reset_button, panel_x, panel_y, scroll_offset)
             reset_clicked = reset_button.handle_event(event)
             reset_button.rect = temp_rect
             
-            temp_rect = close_button.rect.copy()
-            close_button.rect.x += panel_x + 20
-            close_button.rect.y += panel_y + 50 - scroll_offset
+            temp_rect = adjust_ui_element_position(close_button, panel_x, panel_y, scroll_offset)
             close_clicked = close_button.handle_event(event)
             close_button.rect = temp_rect
             
             if save_clicked:
-                _apply_live_config_enhanced(sliders, phrases_box, particle_density_slider, 
+                _apply_live_config(sliders, phrases_box, particle_density_slider, 
                                          current_config, current_drops, monitor_regions)
                 running = False
             elif reset_clicked:
@@ -1562,13 +1274,13 @@ def show_live_config_screen(surface, current_drops, monitor_regions):
                     theme_buttons[i].color = (70, 70, 70) if theme_name != current_config["matrix_theme"] else (110, 110, 70)
                 for i, (effect_name, effect_key) in enumerate(effects):
                     effect_buttons[i].color = (110, 70, 70) if current_config[effect_key] else (70, 70, 70)
-                _apply_live_config_enhanced(sliders, phrases_box, particle_density_slider, 
+                _apply_live_config(sliders, phrases_box, particle_density_slider, 
                                          current_config, current_drops, monitor_regions)
             elif close_clicked:
                 running = False
         
         # Apply changes in real-time
-        _apply_live_config_enhanced(sliders, phrases_box, particle_density_slider, current_config, current_drops, monitor_regions, save_to_file=False)
+        _apply_live_config(sliders, phrases_box, particle_density_slider, current_config, current_drops, monitor_regions, save_to_file=False)
         
         # Draw the configuration panel background with fade-in animation (no full-screen overlay)
         panel_rect = pygame.Rect(panel_x, panel_y, panel_width, panel_height)
@@ -1601,16 +1313,8 @@ def show_live_config_screen(surface, current_drops, monitor_regions):
         content_y_offset = -scroll_offset
         
         # Draw content to content surface with scroll offset
-        # Temporarily adjust slider positions for content surface
         for slider in sliders:
-            # Draw slider to content surface at relative position
-            temp_rect = slider.rect.copy()
-            temp_track_rect = slider.track_rect.copy()
-            slider.rect.y += content_y_offset
-            slider.track_rect.y += content_y_offset
-            slider.draw(content_surface)
-            slider.rect = temp_rect
-            slider.track_rect = temp_track_rect
+            draw_ui_element_with_offset(slider, surface, content_surface, content_y_offset)
         
         # Draw color preview
         current_color = (r_slider.current_val, g_slider.current_val, b_slider.current_val)
@@ -1625,51 +1329,25 @@ def show_live_config_screen(surface, current_drops, monitor_regions):
         # Draw phrases label and box
         phrases_label = get_katakana_font(18).render("Custom Phrases:", True, (180, 255, 180))
         content_surface.blit(phrases_label, (x_start, phrases_box.rect.y - 25 + content_y_offset))
-        temp_rect = phrases_box.rect.copy()
-        phrases_box.rect.y += content_y_offset
-        phrases_box.draw(content_surface)
-        phrases_box.rect = temp_rect
+        draw_ui_element_with_offset(phrases_box, surface, content_surface, content_y_offset)
         
         # Draw theme selection
         content_surface.blit(theme_label, (x_start, theme_buttons[0].rect.y - 25 + content_y_offset))
         for theme_button in theme_buttons:
-            temp_rect = theme_button.rect.copy()
-            theme_button.rect.y += content_y_offset
-            theme_button.draw(content_surface)
-            theme_button.rect = temp_rect
+            draw_ui_element_with_offset(theme_button, surface, content_surface, content_y_offset)
         
         # Draw effect toggles
         content_surface.blit(effect_label, (x_start, effect_buttons[0].rect.y - 25 + content_y_offset))
         for effect_button in effect_buttons:
-            temp_rect = effect_button.rect.copy()
-            effect_button.rect.y += content_y_offset
-            effect_button.draw(content_surface)
-            effect_button.rect = temp_rect
+            draw_ui_element_with_offset(effect_button, surface, content_surface, content_y_offset)
         
         # Draw particle density slider
-        temp_rect = particle_density_slider.rect.copy()
-        temp_track_rect = particle_density_slider.track_rect.copy()
-        particle_density_slider.rect.y += content_y_offset
-        particle_density_slider.track_rect.y += content_y_offset
-        particle_density_slider.draw(content_surface)
-        particle_density_slider.rect = temp_rect
-        particle_density_slider.track_rect = temp_track_rect
+        draw_ui_element_with_offset(particle_density_slider, surface, content_surface, content_y_offset)
         
         # Draw buttons
-        temp_rect = save_button.rect.copy()
-        save_button.rect.y += content_y_offset
-        save_button.draw(content_surface)
-        save_button.rect = temp_rect
-        
-        temp_rect = reset_button.rect.copy()
-        reset_button.rect.y += content_y_offset
-        reset_button.draw(content_surface)
-        reset_button.rect = temp_rect
-        
-        temp_rect = close_button.rect.copy()
-        close_button.rect.y += content_y_offset
-        close_button.draw(content_surface)
-        close_button.rect = temp_rect
+        draw_ui_element_with_offset(save_button, surface, content_surface, content_y_offset)
+        draw_ui_element_with_offset(reset_button, surface, content_surface, content_y_offset)
+        draw_ui_element_with_offset(close_button, surface, content_surface, content_y_offset)
         
         # Blit the content surface to the main surface with clipping
         surface.set_clip(content_rect)
@@ -1707,69 +1385,10 @@ def show_live_config_screen(surface, current_drops, monitor_regions):
         clock.tick(30)
 
 
-def _apply_live_config(sliders, phrases_box, current_drops, monitor_regions, save_to_file=True):
-    """Apply configuration changes immediately to the running screensaver"""
-    global FONT_SIZE, MIN_SPEED, MAX_SPEED, NEW_DROP_CHANCE, CHAR_CHANGE_PROB, STREAM_LENGTH_MIN, STREAM_LENGTH_MAX, DROP_COLOR_BODY, DROP_COLOR_HEAD
-    
-    # Update global variables
-    FONT_SIZE = sliders[0].current_val
-    MIN_SPEED = sliders[1].current_val
-    MAX_SPEED = sliders[2].current_val
-    NEW_DROP_CHANCE = sliders[3].current_val
-    CHAR_CHANGE_PROB = sliders[4].current_val
-    
-    # Calculate stream length from average
-    avg_len = sliders[5].current_val
-    len_spread = max(5, avg_len // 4)
-    STREAM_LENGTH_MIN = max(5, avg_len - len_spread)
-    STREAM_LENGTH_MAX = avg_len + len_spread
-    
-    # Update colors
-    r, g, b = sliders[6].current_val, sliders[7].current_val, sliders[8].current_val
-    update_drop_colors(r, g, b)
-    
-    # Update drops with new font and parameters
-    for monitor_drops in current_drops:
-        for i, drop in enumerate(monitor_drops):
-            if drop is not None:
-                # Update existing drop parameters
-                drop.font = get_katakana_font(FONT_SIZE)
-                drop.screen_height = monitor_regions[0][3] if monitor_regions else 1080
-                
-                # Update speed
-                if MIN_SPEED > MAX_SPEED:
-                    drop.speed = MAX_SPEED
-                else:
-                    drop.speed = random.randint(MIN_SPEED, MAX_SPEED)
-                
-                # Update length
-                if STREAM_LENGTH_MIN > STREAM_LENGTH_MAX:
-                    drop.length = STREAM_LENGTH_MAX
-                else:
-                    drop.length = random.randint(STREAM_LENGTH_MIN, STREAM_LENGTH_MAX)
-                
-                # Regenerate characters with new font
-                drop._generate_initial_characters()
-    
-    # Save to file if requested
-    if save_to_file:
-        config_to_save = {
-            "font_size": FONT_SIZE,
-            "min_speed": MIN_SPEED,
-            "max_speed": MAX_SPEED,
-            "new_drop_chance": NEW_DROP_CHANCE,
-            "char_change_prob": CHAR_CHANGE_PROB,
-            "stream_length_min": STREAM_LENGTH_MIN,
-            "stream_length_max": STREAM_LENGTH_MAX,
-            "body_color_r": r,
-            "body_color_g": g,
-            "body_color_b": b,
-            "custom_phrases": phrases_box.get_lines(),
-        }
-        save_config(config_to_save)
 
 
-def _apply_live_config_enhanced(sliders, phrases_box, particle_density_slider, current_config, current_drops, monitor_regions, save_to_file=True):
+
+def _apply_live_config(sliders, phrases_box, particle_density_slider, current_config, current_drops, monitor_regions, save_to_file=True):
     """Apply enhanced configuration changes immediately to the running screensaver"""
     global FONT_SIZE, MIN_SPEED, MAX_SPEED, NEW_DROP_CHANCE, CHAR_CHANGE_PROB, STREAM_LENGTH_MIN, STREAM_LENGTH_MAX, DROP_COLOR_BODY, DROP_COLOR_HEAD
     global ENABLE_PARTICLES, ENABLE_SOUND, MATRIX_THEME, PARTICLE_DENSITY, GLOW_EFFECT, RAINBOW_MODE, PULSE_EFFECT
@@ -1855,8 +1474,6 @@ def main():
     info = pygame.display.Info()
     SCREEN_WIDTH = info.current_w
     SCREEN_HEIGHT = info.current_h
-    show_config_ui = False
-    run_full_screensaver = True
     arg = ""
     display_index = None
 
@@ -1868,48 +1485,27 @@ def main():
             arg = a.lower()
 
     if arg.startswith("/c"):
-        show_config_ui = True
-        run_full_screensaver = False
+        print("Configuration mode (/c) is no longer supported. Use 'M' key during screensaver for live configuration.")
+        pygame.quit()
+        sys.exit()
     elif arg == "/s":
         pass
     elif arg.startswith("/p"):
         print("Preview mode (/p) runs fullscreen for this script version.")
     elif len(sys.argv) > 1:
         print(f"Unknown argument: {arg}. Running screensaver with current settings.")
-    elif not os.path.exists(CONFIG_FILE):
-        show_config_ui = True
 
-    if show_config_ui:
-        config_screen_width = 780
-        config_screen_height = 480
-        try:
-            screen = pygame.display.set_mode(
-                (config_screen_width, config_screen_height), 0, 32
-            )
-            pygame.display.set_caption("Screensaver Configuration")
-            pygame.mouse.set_visible(True)
-            show_config_screen(screen)
-            load_config()
-        except pygame.error as e:
-            print(f"Could not set display mode for config: {e}.")
-            if arg.startswith("/c"):
-                pygame.quit()
-                sys.exit("Failed to display config.")
-        if arg.startswith("/c") and not run_full_screensaver:
-            pygame.quit()
-            sys.exit()
-
-    if run_full_screensaver:
-        load_config()
-        # --- Single large window spanning all displays ---
-        try:
-            display_sizes = pygame.display.get_desktop_sizes()
-            total_width = sum(w for w, h in display_sizes)
-            max_height = max(h for w, h in display_sizes)
-            screen = pygame.display.set_mode((total_width, max_height), pygame.FULLSCREEN | pygame.NOFRAME)
-        except Exception:
-            screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.FULLSCREEN | pygame.NOFRAME)
-        run_screensaver(screen)
+    # Always run the screensaver
+    load_config()
+    # --- Single large window spanning all displays ---
+    try:
+        display_sizes = pygame.display.get_desktop_sizes()
+        total_width = sum(w for w, h in display_sizes)
+        max_height = max(h for w, h in display_sizes)
+        screen = pygame.display.set_mode((total_width, max_height), pygame.FULLSCREEN | pygame.NOFRAME)
+    except Exception:
+        screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.FULLSCREEN | pygame.NOFRAME)
+    run_screensaver(screen)
     pygame.quit()
     sys.exit()
 
