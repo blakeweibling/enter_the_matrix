@@ -866,6 +866,9 @@ def run_screensaver(screen):
         phrase_text = ""
         phrase_start_time = 0
         phrase_font = get_katakana_font(max(42, FONT_SIZE * 2))
+        toast_msg = "Press H for hotkeys"
+        toast_until = pygame.time.get_ticks() + 2500
+        theme_names = list(MATRIX_THEMES.keys())
         
         while running:
             current_time = pygame.time.get_ticks()
@@ -873,8 +876,10 @@ def run_screensaver(screen):
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
                     running = False
-                if event.type == pygame.KEYDOWN:
-                    if event.key == pygame.K_m:
+                elif event.type == pygame.KEYDOWN:
+                    if event.key == pygame.K_ESCAPE:
+                        running = False
+                    elif event.key == pygame.K_m:
                         pygame.mouse.set_visible(True)
                         show_live_config_screen(screen, monitor_drops, monitor_regions)
                         pygame.mouse.set_visible(False)
@@ -885,8 +890,64 @@ def run_screensaver(screen):
                         load_config()
                         continue
                     else:
-                        running = False
-                if event.type == pygame.MOUSEBUTTONDOWN:
+                        # Runtime hotkeys - change settings without stopping
+                        need_save = False
+                        if event.key in (pygame.K_EQUALS, pygame.K_PLUS):
+                            MIN_SPEED = min(10, MIN_SPEED + 1)
+                            MAX_SPEED = min(15, MAX_SPEED + 1)
+                            toast_msg, toast_until = f"Speed: {MIN_SPEED}-{MAX_SPEED}", pygame.time.get_ticks() + 1500
+                            need_save = True
+                        elif event.key == pygame.K_MINUS:
+                            MIN_SPEED = max(1, MIN_SPEED - 1)
+                            MAX_SPEED = max(2, MAX_SPEED - 1)
+                            toast_msg, toast_until = f"Speed: {MIN_SPEED}-{MAX_SPEED}", pygame.time.get_ticks() + 1500
+                            need_save = True
+                        elif event.key == pygame.K_RIGHTBRACKET:
+                            FONT_SIZE = min(32, FONT_SIZE + 2)
+                            active_font = get_katakana_font(FONT_SIZE)
+                            toast_msg, toast_until = f"Font: {FONT_SIZE}", pygame.time.get_ticks() + 1500
+                            need_save = True
+                        elif event.key == pygame.K_LEFTBRACKET:
+                            FONT_SIZE = max(10, FONT_SIZE - 2)
+                            active_font = get_katakana_font(FONT_SIZE)
+                            toast_msg, toast_until = f"Font: {FONT_SIZE}", pygame.time.get_ticks() + 1500
+                            need_save = True
+                        elif event.key == pygame.K_p:
+                            ENABLE_PARTICLES = not ENABLE_PARTICLES
+                            toast_msg, toast_until = f"Particles: {'On' if ENABLE_PARTICLES else 'Off'}", pygame.time.get_ticks() + 1500
+                            need_save = True
+                        elif event.key == pygame.K_g:
+                            GLOW_EFFECT = not GLOW_EFFECT
+                            toast_msg, toast_until = f"Glow: {'On' if GLOW_EFFECT else 'Off'}", pygame.time.get_ticks() + 1500
+                            need_save = True
+                        elif event.key == pygame.K_r:
+                            RAINBOW_MODE = not RAINBOW_MODE
+                            toast_msg, toast_until = f"Rainbow: {'On' if RAINBOW_MODE else 'Off'}", pygame.time.get_ticks() + 1500
+                            need_save = True
+                        elif event.key == pygame.K_t:
+                            idx = (theme_names.index(MATRIX_THEME) + 1) % len(theme_names)
+                            MATRIX_THEME = theme_names[idx]
+                            theme_colors = MATRIX_THEMES[MATRIX_THEME]
+                            background_color = theme_colors["background"]
+                            update_drop_colors(*theme_colors["body_color"])
+                            toast_msg, toast_until = f"Theme: {MATRIX_THEME}", pygame.time.get_ticks() + 1500
+                            need_save = True
+                        elif event.key == pygame.K_h:
+                            toast_msg = "M=Config ESC=Exit +/- Speed [ ] Font P G R T=effects"
+                            toast_until = pygame.time.get_ticks() + 3000
+                        if need_save:
+                            config_to_save = {
+                                "font_size": FONT_SIZE, "min_speed": MIN_SPEED, "max_speed": MAX_SPEED,
+                                "new_drop_chance": NEW_DROP_CHANCE, "char_change_prob": CHAR_CHANGE_PROB,
+                                "stream_length_min": STREAM_LENGTH_MIN, "stream_length_max": STREAM_LENGTH_MAX,
+                                "body_color_r": DROP_COLOR_BODY[0], "body_color_g": DROP_COLOR_BODY[1], "body_color_b": DROP_COLOR_BODY[2],
+                                "custom_phrases": load_config().get("custom_phrases", []),
+                                "enable_particles": ENABLE_PARTICLES, "enable_sound": ENABLE_SOUND,
+                                "matrix_theme": MATRIX_THEME, "particle_density": PARTICLE_DENSITY,
+                                "glow_effect": GLOW_EFFECT, "rainbow_mode": RAINBOW_MODE, "pulse_effect": PULSE_EFFECT,
+                            }
+                            save_config(config_to_save)
+                elif event.type == pygame.MOUSEBUTTONDOWN:
                     running = False
                 if event.type == pygame.MOUSEMOTION:
                     if (
@@ -975,6 +1036,14 @@ def run_screensaver(screen):
                         screen.blit(shadow, (x + 2, y + 2))
                         screen.blit(phrase_surf, (x, y))
             
+            # Draw toast message for hotkey feedback
+            if toast_msg and current_time < toast_until:
+                toast_font = get_katakana_font(18)
+                toast_surf = toast_font.render(toast_msg, True, (200, 255, 200))
+                toast_rect = toast_surf.get_rect(center=(screen.get_width() // 2, 40))
+                pygame.draw.rect(screen, (20, 30, 20), toast_rect.inflate(20, 10), border_radius=6)
+                screen.blit(toast_surf, toast_rect)
+            
             pygame.display.flip()
             clock.tick(FRAME_RATE)
         
@@ -1025,6 +1094,7 @@ def show_live_config_screen(surface, current_drops, monitor_regions):
     content_height = 800  # Total content height (larger than visible area)
     scroll_offset = 0
     max_scroll = max(0, content_height - panel_height + 120)  # Maximum scroll distance
+    content_rect = pygame.Rect(panel_x + 20, panel_y + 50, content_width, panel_height - 100)
     
     # Create sliders for live configuration
     slider_width = 250
@@ -1306,7 +1376,6 @@ def show_live_config_screen(surface, current_drops, monitor_regions):
         surface.blit(title_surf, (panel_x + (panel_width - title_surf.get_width()) // 2, panel_y + 20))
         
         # Create a clipping area for scrollable content
-        content_rect = pygame.Rect(panel_x + 20, panel_y + 50, content_width, panel_height - 100)
         content_surface = pygame.Surface((content_width, content_height), pygame.SRCALPHA)
         
         # Draw all content to the content surface (with scroll offset applied)
@@ -1374,7 +1443,7 @@ def show_live_config_screen(surface, current_drops, monitor_regions):
         instructions = [
             "Use arrow keys or mouse wheel to scroll",
             "Press ENTER or Save to save permanently",
-            "Press ESC or Close to cancel"
+            "Press ESC or Close to cancel | Press H in screensaver for hotkeys"
         ]
         for i, instruction in enumerate(instructions):
             inst_surf = instruction_font.render(instruction, True, (180, 180, 180))
@@ -1467,6 +1536,32 @@ def _apply_live_config(sliders, phrases_box, particle_density_slider, current_co
         save_config(config_to_save)
 
 
+def _apply_cli_overrides():
+    """Apply command-line overrides for this run (e.g. --font-size=27 --theme=cyberpunk). Does not save to config."""
+    global FONT_SIZE, MIN_SPEED, MAX_SPEED, MATRIX_THEME
+    load_config()
+    for a in sys.argv[1:]:
+        if a.startswith("--font-size="):
+            try:
+                v = int(a.split("=")[-1])
+                FONT_SIZE = max(10, min(32, v))
+            except ValueError:
+                pass
+        elif a.startswith("--speed="):
+            try:
+                parts = a.split("=")[-1].split(",")
+                if len(parts) == 2:
+                    mn, mx = int(parts[0]), int(parts[1])
+                    MIN_SPEED, MAX_SPEED = max(1, mn), min(15, mx)
+            except (ValueError, IndexError):
+                pass
+        elif a.startswith("--theme="):
+            t = a.split("=")[-1].lower()
+            if t in MATRIX_THEMES:
+                MATRIX_THEME = t
+                update_drop_colors(*MATRIX_THEMES[t]["body_color"])
+
+
 def main():
     global SCREEN_WIDTH, SCREEN_HEIGHT
     pygame.init()
@@ -1477,10 +1572,12 @@ def main():
     arg = ""
     display_index = None
 
-    # Parse arguments for display index
+    # Parse arguments for display index and CLI overrides
     for a in sys.argv[1:]:
         if a.startswith("--display="):
             display_index = int(a.split("=")[-1])
+        elif a.startswith("--"):
+            pass  # CLI overrides handled below
         else:
             arg = a.lower()
 
@@ -1492,11 +1589,11 @@ def main():
         pass
     elif arg.startswith("/p"):
         print("Preview mode (/p) runs fullscreen for this script version.")
-    elif len(sys.argv) > 1:
+    elif len(sys.argv) > 1 and not any(a.startswith("--") for a in sys.argv[1:]):
         print(f"Unknown argument: {arg}. Running screensaver with current settings.")
 
-    # Always run the screensaver
-    load_config()
+    # Apply CLI overrides (--font-size=27 --theme=cyberpunk --speed=5,10)
+    _apply_cli_overrides()
     # --- Single large window spanning all displays ---
     try:
         display_sizes = pygame.display.get_desktop_sizes()

@@ -6,9 +6,9 @@
     "char_change_prob": 0.08,
     "stream_length_min": 34,
     "stream_length_max": 56,
-    "body_color_r": 0,
-    "body_color_g": 152,
-    "body_color_b": 0,
+    "body_color_r": 101,
+    "body_color_g": 233,
+    "body_color_b": 87,
     "custom_phrases": [
         "Neo...",
         "Wake up Neo...",
