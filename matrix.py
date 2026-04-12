@@ -3,9 +3,6 @@ import random
 import sys
 import json
 import os
-import win32gui
-import win32con
-import win32api
 import math
 
 
@@ -857,10 +854,6 @@ def run_screensaver(screen):
         clock = pygame.time.Clock()
         running = True
         pygame.event.clear()
-        pygame.mouse.get_pos()
-        time_since_last_significant_move = pygame.time.get_ticks()
-        significant_move_delay = 500
-        last_mouse_pos = pygame.mouse.get_pos()
         phrase_next_time = pygame.time.get_ticks() + random.randint(5000, 10000)
         phrase_showing = False
         phrase_text = ""
@@ -883,9 +876,6 @@ def run_screensaver(screen):
                         pygame.mouse.set_visible(True)
                         show_live_config_screen(screen, monitor_drops, monitor_regions)
                         pygame.mouse.set_visible(False)
-                        # Reset mouse position tracking after live config
-                        last_mouse_pos = pygame.mouse.get_pos()
-                        time_since_last_significant_move = current_time
                         # Reload config after live configuration
                         load_config()
                         continue
@@ -947,20 +937,6 @@ def run_screensaver(screen):
                                 "glow_effect": GLOW_EFFECT, "rainbow_mode": RAINBOW_MODE, "pulse_effect": PULSE_EFFECT,
                             }
                             save_config(config_to_save)
-                elif event.type == pygame.MOUSEBUTTONDOWN:
-                    running = False
-                if event.type == pygame.MOUSEMOTION:
-                    if (
-                        current_time - time_since_last_significant_move
-                        > significant_move_delay
-                    ):
-                        current_mouse_pos = event.pos
-                        if (
-                            abs(current_mouse_pos[0] - last_mouse_pos[0]) > 3
-                            or abs(current_mouse_pos[1] - last_mouse_pos[1]) > 3
-                        ):
-                            running = False
-                    last_mouse_pos = event.pos
             
             if not running:
                 break
@@ -1608,9 +1584,16 @@ def main():
 
 
 def set_window(hwnd, x, y, w, h):
-    # Set window position and parent
+    """Embed pygame window in a parent HWND (requires pywin32: pip install pywin32)."""
+    try:
+        import win32gui
+        import win32con
+    except ImportError as e:
+        raise ImportError(
+            "Parent window mode (--hwnd) needs pywin32. Install with: pip install pywin32"
+        ) from e
     pygame.display.set_mode((w, h), pygame.NOFRAME)
-    window = pygame.display.get_wm_info()['window']
+    window = pygame.display.get_wm_info()["window"]
     win32gui.SetWindowLong(window, win32con.GWL_STYLE, win32con.WS_VISIBLE)
     win32gui.SetParent(window, int(hwnd))
     win32gui.MoveWindow(window, x, y, w, h, True)
