@@ -17,7 +17,7 @@
     "enable_particles": true,
     "enable_sound": false,
     "matrix_theme": "classic",
-    "particle_density": 0.3,
+    "particle_density": 0.6,
     "glow_effect": true,
     "rainbow_mode": false,
     "pulse_effect": false
